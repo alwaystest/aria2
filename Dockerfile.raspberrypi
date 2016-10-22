@@ -15,12 +15,17 @@ ENV LOCAL_DIR /local
 
 ENV TOOL_BIN_DIR /tools/arm-bcm2708/gcc-linaro-$HOST-raspbian-x64/bin
 ENV PATH ${TOOL_BIN_DIR}:$PATH
+ENV CC $HOST-gcc
+ENV CFLAGS -march=armv7-a -mtune=cortex-a9
 
 RUN mkdir $LOCAL_DIR && mkdir zlib && cd zlib && \
    curl -Ls -o - 'http://zlib.net/zlib-1.2.8.tar.gz'  | \
         tar xzf - --strip-components=1 && \
+   CFLAGS="-march=armv7-a -mtune=cortex-a9" \
    prefix=${LOCAL_DIR} \
+   PKG_CONFIG_PATH="$LOCAL_DIR/lib/pkgconfig" \
    CC=$HOST-gcc \
+   CXX=$HOST-g++ \
    STRIP=$HOST-strip \
    RANLIB=$HOST-ranlib \
    AR=$HOST-ar \
@@ -79,6 +84,32 @@ RUN mkdir sqlite && cd sqlite && \
     make -s && \
     make -s install
 
+RUN mkdir openssl && cd openssl && \
+   curl -Ls -o - 'http://www.openssl.org/source/openssl-1.0.2j.tar.gz' | \
+       tar xzf - --strip-components=1 && \
+   ./Configure linux-armv4 $CFLAGS \
+       --prefix=${LOCAL_DIR} shared zlib zlib-dynamic \
+       -D_GNU_SOURCE -D_BSD_SOURCE \
+       --with-zlib-lib=$LOCAL_DIR/lib \
+       --with-zlib-include=$LOCAL_DIR/include && \
+    make CC=$CC &&  \
+    make CC=$CC  install INSTALLTOP=$LOCAL_DIR OPENSSLDIR=$LOCAL_DIR/ssl
+
+RUN mkdir libssh && cd libssh && \
+   curl -Ls -o - 'https://www.libssh2.org/download/libssh2-1.7.0.tar.gz' | \
+       tar xzf - --strip-components=1 && \
+   rm -rf $LOCAL_DIR/lib/pkgconfig/libssh2.pc && \
+   ./configure \
+       --host=$HOST \
+       --without-libgcrypt \
+       --with-openssl \
+       --without-wincng \
+       --prefix=$LOCAL_DIR \
+       --enable-static \
+       --disable-shared && \
+   make && \
+   make install
+
 RUN mkdir aria && cd aria && \
     curl -s 'https://api.github.com/repos/aria2/aria2/releases/latest' | \
         grep 'browser_download_url.*[0-9]\.tar\.bz2' | sed -e 's/^[[:space:]]*//' | \
@@ -87,14 +118,15 @@ RUN mkdir aria && cd aria && \
         --host=$HOST \
         --build=`dpkg-architecture -qDEB_BUILD_GNU_TYPE` \
         --disable-nls \
-        --disable-ssl \
         --without-gnutls \
+        --with-openssl \
         --without-libxml2 \
         --with-libz     --with-libz-prefix=${LOCAL_DIR} \
         --with-libexpat --with-libexpat-prefix=${LOCAL_DIR} \
         --with-slite3   --with-sqlite3-prefix=${LOCAL_DIR} \
         --with-libcares --with-libcares-prefix=${LOCAL_DIR} \
         --prefix=${LOCAL_DIR} \
+        --with-ca-bundle='/etc/ssl/certs/ca-certificates.crt' \
         LDFLAGS="-L$LOCAL_DIR/lib" \
         PKG_CONFIG_PATH="$LOCAL_DIR/lib/pkgconfig" \
         ARIA2_STATIC=yes && \
